@@ -94,7 +94,7 @@ Let's install the app dependencies:
 
 
 ```sh
-$ npm install --save mongoose restify joi http-status restify-errors restify-url-semver winston dotenv
+$ npm install --save mongoose restify joi http-status restify-errors restify-url-semver winston@next dotenv
 ```
 
 * mongoose is a MongoDB object modeling tool designed to work in an asynchronous environment.
@@ -281,7 +281,7 @@ server.listen(config.app.port, () => {
 First thing we did was to load the variables in `.env` file into `process.env` once the app starts up. We proceed to importing dependencies and creating server with the configuration we created previously.
 
 __NOTE: Unix users would need this command: 
-`export $(cat .env | sed -e /^$/d -e /^#/d | xargs)` to load the .env variables to shell environment.__
+`export $(cat .env | sed -e /^$/d -e /^#/d | xargs)` in the root directory - `birthdates-api/` to load the .env variables to shell environment.__
 
 Inside the project root directory, start the server with this command:
 
@@ -310,13 +310,13 @@ const { combine, timestamp, label, prettyPrint } = format;
     * @returns {array} the created transports
     */
 const createTransports = function(config) {
-    const transports = [];
+    const customTransports = [];
 
     // setup the file transport
     if (config.file) {
 
         // setup the log transport
-        transports.push(
+        customTransports.push(
             new transports.File({
                 filename: config.file,
                 level: config.level
@@ -326,14 +326,14 @@ const createTransports = function(config) {
 
     // if config.console is set to true, a console logger will be included.
     if (config.console) {
-        transports.push(
+        customTransports.push(
             new transports.Console({
                 level: config.level
             })
         );
     }
 
-    return transports;
+    return customTransports;
 };
 
 module.exports = {
@@ -478,7 +478,7 @@ serviceLocator.register('errs', () => {
     return require('restify-errors');
 });
 
-module.exports = new ServiceLocator();
+module.exports = serviceLocator;
 ```
 
 Calling the  `register` method adds a dependency to the dependency graph and can be retrieved by calling the `get` method with the `dependencyName`.
@@ -492,7 +492,7 @@ $ mongod
 
 If the command above fails, checkout their [documentation](https://docs.mongodb.com/manual/tutorial/) on how to start the server for your OS.
 
-Create `database.js` inside `app/configs`
+Create `database.js` inside `app/configs/`
 
 ```js
 // app/configs/database.js
@@ -503,14 +503,14 @@ const serviceLocator = require('app/lib/service_locator');
 const logger = serviceLocator.get('logger');
 
 class Database {
-    constructor(host, port, name) {
+    constructor(port, host, name) {
         this.mongoose = serviceLocator.get('mongoose');
-        this._connect(host, port, name);
+        this._connect(port, host, name);
     }
 
-    _connect(host, port, name) {
+    _connect(port, host, name) {
         this.mongoose.Promise = global.Promise;
-        this.mongoose.connect(`mongodb://mongo:27017/${name}`);
+        this.mongoose.connect(`mongodb://${host}:${port}/${name}`);
         const { connection } = this.mongoose;
         connection.on('connected', () =>
             logger.info('Database Connection was Successful')
@@ -540,8 +540,10 @@ Our Database class has just a single method that connects to the running mongodb
 
 For our Birthdates api, we need to define a model, `Users` and a submodel, `Birthdates`. The `Users` model would hold the properties of the user using the api e.g. `username`, `birthdate` and lastly `birthdates`. The `birthdates` submodel would define the `fullname` and `birthdates` of our friends and we will embed it as an array inside the `Users` model.
 
+Create `Users.js` inside `app/models/`
+
 ```js
-// app/models/users
+// app/models/Users.js
 
 'use strict';
 
@@ -618,7 +620,10 @@ class UserService {
 
         let newUser = new Users(body);
         newUser.birthdate = new Date(body.birthdate);
-        return newUser.save();
+        newUser = await newUser.save();
+
+        this.log.info('User Created Successfully');
+        return newUser;
     }
 
     async getUser(username) {
@@ -632,6 +637,7 @@ class UserService {
             return err;
         }
 
+        this.log.info('User fetched Successfully');
         return user;
     }
 }
@@ -648,7 +654,7 @@ Let's analyze it:
 
 Now we have the chunks of code to create a user and get a specified user. Let's proceed to create the controller to implement this service. 
 
-Noticed how we are able to recieve and initialize the dependencies of the `user service` inside it's constructor? The dependency injection makes that possible, we will get to that part soon.
+Noticed how we were able to recieve and initialize the dependencies of the `user service` inside it's constructor? The dependency injection makes that possible, we will get to that part soon.
 
 Inside `app/controllers/`, create `user.js`:
 
@@ -665,21 +671,27 @@ class UserController {
     }
 
     async create(req, res) {
-        const { body } = req;
-        const result = await this.userService.createUser(body);
-        if (result instanceof Error)
-            this.log.info('An error occured creating user' + result);
-        else this.log.info('User Created Successfully');
-        res.send(result);
+        try {
+            const { body } = req;
+            const result = await this.userService.createUser(body);
+            
+            res.send(result);
+        } catch (err) {
+            this.log.error(err.message);
+            res.send(err);
+        }
     }
 
     async get(req, res) {
-        const { username } = req.params;
-        const result = await this.userService.getUser(username);
-        if (result instanceof Error)
-            this.log.info('An error occured creating user' + result);
-        else this.log.info('User fetched Successfully');
-        res.send(result);
+        try{
+            const { username } = req.params;
+            const result = await this.userService.getUser(username);
+            
+            res.send(result);
+        } catch (err) {
+            this.log.error(err.message);
+            res.send(err);
+        }
     }
 
 }
@@ -688,7 +700,7 @@ module.exports = UserController;
 ```
 The controller basically calls the services to perform particular action and sends response back to the client. 
 
-Now, let's create birthdate service and controller to save and fetch birthdates. Inside `app/services`, create `birthdate.js`.
+Now, let's create birthdate service and controller to save and fetch birthdates. Inside `app/services`, create `birthdates.js`.
 
 ```js
 // app/services/birthdates.js
@@ -753,7 +765,55 @@ Let's analyze it:
 
 * `getBirthdates` method gets all the `birthdates` of the user that made the request and returns the result to the Birthdate controller which completes the request.
 
+Let's proceed to create the controller for our `birthdates service`.
 
+Inside `app/controllers/`, create `birthdates.js`:
+
+```js
+// app/controllers/birthdates
+
+'use strict';
+
+const serviceLocator = require('app/lib/service_locator');
+
+class BirthdateController {
+    constructor(log, birthdateService, httpSatus) {
+        this.log = log;
+        this.birthdateService = birthdateService;
+        this.httpSatus = httpSatus;
+    }
+
+    async create(req, res) {
+        try {
+            const { body } = req;
+            const { username } = req.params;
+            const result = await this.birthdateService.createBirthdate(
+                username,
+                body
+            );
+            if(result instanceof Error) 
+                res.send(result);
+            else res.send(`${body.fullname}'s birthdate saved successfully!`)
+        } catch (err) {
+            this.log.error(err.message);
+            res.send(err);
+        }
+    }
+
+    async listAll(req, res) {
+        try {
+            const { username } = req.params;
+            const result = await this.birthdateService.getBirthdates(username);
+            res.send(result);
+        } catch (err) {
+            this.log.error(err.message);
+            res.send(err);
+        }
+    }
+}
+
+module.exports = BirthdateController;
+```
 We need to register the services and controllers we just created with our `serviceLocator` so we can inject their dependencies with ease.
 Open up `app/configs/di.js` and add the code below:
 
@@ -767,7 +827,7 @@ serviceLocator.register('birthdateService', (serviceLocator) => {
     const mongoose = serviceLocator.get('mongoose');
     const httpStatus = serviceLocator.get('httpStatus');
     const errs = serviceLocator.get('errs');
-    const BirthdateService = require('app/services/birthdate');
+    const BirthdateService = require('app/services/birthdates');
 
     return new BirthdateService(log, mongoose, httpStatus, errs);
 });
@@ -786,7 +846,7 @@ serviceLocator.register('birthdateController', (serviceLocator) => {
     const log = serviceLocator.get('logger');
     const httpStatus = serviceLocator.get('httpStatus');
     const birthdateService = serviceLocator.get('birthdateService');
-    const BirthdateController = require('app/controllers/birthdate');
+    const BirthdateController = require('app/controllers/birthdates');
 
     return new BirthdateController(log, birthdateService, httpStatus);
 });
@@ -906,7 +966,7 @@ module.exports.paramValidation = function(log, joi) {
 
                     res.send(
                         httpStatus.BAD_REQUEST,
-                        new errors.InvalidParamError('Missing request ' + i)
+                        new errors.InvalidArgumentError('Missing request ' + i)
                     );
                     return;
                 }
@@ -918,7 +978,7 @@ module.exports.paramValidation = function(log, joi) {
 
                     res.send(
                         httpStatus.BAD_REQUEST,
-                        new errors.InvalidParamError(
+                        new errors.InvalidArgumentError(
                             'Invalid request ' + i + ' - ' + result.error.details[0].message
                         )
                     );
@@ -939,7 +999,7 @@ Firstly, the function retrieves the `validation` property defined in the route `
 
 If it does, we validate the value obtained from the `request` object  with the predefined set of rules (schema) for the request path. If the input is invalid, the result will be an Error object.
 
-Now, let's define the routes and provide the validation rules for each path.
+Now, let's define the routes and provide the validation rules for all the paths.
 
 Inside `app/routes/`, create `routes.js`:
 
@@ -1070,8 +1130,11 @@ Let's update the `server.js` file to initialize the route and our request valida
 
 const serviceLocator = require("app/configs/di");
 const validator = require("app/lib/validator");
-const handler = require("app/routes/handlers");
+const handler = require("app/routes/error_handler");
 const routes = require("app/routes/routes");
+const joi = require("joi");
+const logger = serviceLocator.get("logger");
+
 const server = restify.createServer({
     ...
 });
@@ -1101,6 +1164,61 @@ server.listen(config.app.port, () => {
 That's it!!! We have just built a well organised api with Restify.
 Let's take our baby for a spin, shall we ?
 
+First we create a `User`:
+
+```sh
+$ curl -H "Content-Type: application/json" -X POST -d '{"username":"biodunch","birthdate":"12/2/2000"}' localhost:5000/v1/users
+```
+
+Response:
+
+```json
+{
+   "status":"success",
+   "data":{
+      "_id":"5adbb4819b09be4ea8da5902",
+      "username":"biodunch",
+      "birthdate":"2000-12-01T23:00:00.000Z",
+      "birthdates":[],
+      "createdAt":"2018-04-21T22:00:33.838Z",
+      "updatedAt":"2018-04-21T22:00:33.838Z",
+      "__v":0
+   }
+}
+```
+Now, let's create birthdate for the created user:
+
+```sh
+$ curl -H "Content-Type: application/json" -X POST -d '{"fullname":"Falomo Olumide","birthdate":"10/3/2000"}' localhost:5000/v1/birthdates/biodunch
+```
+Response:
+
+```json
+{
+   "status":"success",
+   "data":"Falomo Olumide's birthdate saved successfully!"
+}
+```
+
+Now, let's fetch the birthdates saved by `biodunch` :)
+
+```sh
+$ curl localhost:5000/v1/birthdates/biodunch
+```
+Response:
+
+```json
+{
+   "status":"success",
+   "data":[
+      {
+         "_id":"5adbb5e59b09be4ea8da5903",
+         "birthdate":"2000-10-02T23:00:00.000Z",
+         "fullname":"Falomo Olumide"
+      }
+   ]
+}
+```
 ASIDES:
 
 This is a two - part series, in the second article we will cover:
