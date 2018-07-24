@@ -1,0 +1,320 @@
+---
+layout: post
+title: "Configure CI & CD with CircleCI"
+description: "In this article, you will learn how to integrate CI / CD workflow with your project"
+date: "2018-07-24 08:30"
+category: Technical Guide, Backend, NodeJS
+author:
+  name: "Biodun Chris"
+  url: "biodunch"
+  mail: "biodunch@gmail.com"
+  avatar: "https://twitter.com/biodunch/profile_image?size=original"
+related:
+- 
+---
+
+**TL;DR:** In this article, you will learn how to integrate the project created in this [article](https://auth0.com/blog/developing-well-organized-apis-with-nodejs-joi-and-mongo/) in a CI/CD (Continuous Integration and Continuous Delivery) workflow to automate the release process using [CircleCI](circleci.com) and [Heroku](heroku.com) .
+
+{% include tweet_quote.html quote_text="Learn how to integrate your project with CI/CD workflow using @circleci and @heroku" %}
+
+## Configure CI & CD with CirlceCI
+
+Automation comes in different forms, from builds, to tests then deployments. With continuous integration, you can achieve automated builds, testing, packaging and any other development process. 
+
+
+Continuous Integration is about delivering small chunks of code continuously which improves a development team’s productivity and helps them fix bugs quickly before the release and deployment phases.
+
+While Continuous Integration prepares your code faster for release, Continuous Deployment takes off right after it and ensures release of new changes to your customers quickly in a sustainable way. With Continuous Deployment, every change that passes all stages of your production pipeline is released to your customers. 
+
+{% include tweet_quote.html quote_text="With Continuous Integration, you can achieve automated builds, testing, packaging and lots more." %}
+
+
+In this article, we would integrate CI/CD workflow with the [birthdates-api](https://auth0.com/blog/developing-well-organized-apis-with-nodejs-joi-and-mongo/) using `CircleCI` as the Continuous Integration Server and automate deployments to `Heroku`.
+
+{% include tweet_quote.html quote_text="Continuous Intergation increases confidence in code long before production." %}
+
+## Prerequisites
+
+Before you continue this article, you must have completed [the first part](https://auth0.com/blog/developing-well-organized-apis-with-nodejs-joi-and-mongo/) where you must have built the project used in this article 
+
+
+### What Tools Will You Use
+
+As said earlier, we will be using CircleCI and Heroku. This section provides an overview of these tools.
+
+### CircleCI
+
+CircleCI is continuous integration and delivery platform makes it easy for teams of all sizes to rapidly build and release quality software at scale.
+
+### Heroku
+
+Heroku is a platform as a service (PaaS) that enables developers to build, run, and operate applications entirely in the cloud.
+
+### ESLint
+
+ESLint is a tool for identifying and reporting on patterns found in ECMAScript/JavaScript code, with the goal of making code more consistent and avoiding bugs. 
+
+## Configure CircleCI for Birthdates API
+
+If you have the project from previous article on your laptop you can continue from there, if not clone this [project](https://github.com/auth0-blog/nodejs-restify).
+
+### Setting Up Linter
+
+First step in this article is to setup Linter for the project which will be one of the stages of the CirleCI build jobs. The linter we would be using is [ESLint](https://eslint.org/).
+
+Run this command to install ESLint in the project directory;
+
+```bash 
+$ npm install eslint --save-dev
+```
+
+To setup the default configuration file, in your project directory, run;
+
+```bash
+$ ./node_modules/.bin/eslint --init
+```
+When prompted follow the guide in the screenshot below:
+
+![](https://i.imgur.com/1Wni4Mqg.png)
+
+If you have problem setting it up, checkout their [getting started guide](https://eslint.org/docs/user-guide/getting-started).
+
+Open `./eslintrc.yml` and add the following configuration to it:
+
+```yml
+extends: airbnb-base
+rules:
+  semi:
+    - error
+    - always
+  indent:
+    - error
+    - 2
+  comma-dangle:
+    - warn
+    - never
+```
+Once you are done, add a command to run linting and fix errors in your `package.json` file like below:
+
+```json
+...
+"script": {
+  ...
+  "lint": "./node_modules/.bin/eslint ./app/*",
+  "fix-lint": "./node_modules/.bin/eslint --fix ./app/*"
+  ...
+}
+...
+```
+Take ESlint for a spin!
+
+```bash
+$ npm run lint
+```
+
+Did you get so many red flags? Get to fixing, lol.
+Fix faster with:
+
+```bash
+$ npm run fix-lint
+```
+NOTE: The command fixes actual files with errors and only the remaining unfixed issues are output. The `--fix` option doesn't fix all problems.
+
+### Setting Up Version Control
+
+To practise Continuous Integration, you have to host your source code on a  version control server. For this project, you will use `Github`. 
+So head over to github and create a repository named `birthdates-api`. Next is to push your local changes to github.
+
+If you haven't initialized git, run the following command otherwise skip this part;
+
+```bash
+$ git init
+$ echo 'node_modules/' >> './.gitignore'
+```
+Run this command to commit your changes and push to github;
+
+```bash
+$ git add . # adds changes to staging area
+$ git commit -m some_changes  # commits all staged files
+$ git push repo_url master  # pushes changes to github where the repo_url is the url of the source code on github
+```
+
+### Setting Up CircleCI for Continuous Integration
+Now that your code is hosted on github, next step is to connect CircleCI to connect with your Github account so it can pull the code from it everytime it runs a build.
+Head over to [https://circleci.com/account](https://circleci.com/account), select `Account Integrations` then `Connect with Github`.
+Once that is done, head over to your [CircleCI Dashboard](https://circleci.com/dashboard), select `Add Project` from the side bar. Choose the `birthdates-api` project and hit the `Set up Project` button.
+![Set up project](https://i.imgur.com/KmYUQiO.png)
+Select the Operating System to run the builds and Language as seen in the screenshot above. 
+
+Next thing is to create CircleCI configuration file in the root directory of the project where you will describe the jobs and build steps.
+
+Create `.circleci` directory then `config.yml` inside the directory with the snippets below:
+
+```yaml
+version: 2
+jobs:
+  build:
+    docker:
+      - image: circleci/node:8.10.0
+
+    working_directory: ~/app
+
+    steps:
+      - checkout
+
+      # Download and cache dependencies
+      - restore_cache:
+          keys:
+          - birthdates_api-{{ checksum "package.json" }}
+          # fallback to using the latest cache if no exact match is found
+          - birthdates_api-
+
+      - run: npm install
+
+      - save_cache:
+          paths:
+            - node_modules
+          key: birthdates_api-{{ checksum "package.json" }}
+        
+      # run lint!
+      - run: npm run lint
+
+workflows:
+  version: 2
+  build-deploy:
+    jobs:
+      - build
+```
+This is a brief analysis of the configuration file:
+
+* `version`: Indicates the version of circleci configuration you are using
+* `jobs`: These are specific tasks you want CircleCI to run upon checking in of code i.e. everytime a build is triggered. Jobs let's just similar / related tasks together. In your `config.yml`, you defined one job, `build`. Under the `build` job, you specified the docker image to be used to run the build, then select the working directory. The `steps` section of the job is where you define specific task to perform everytime build is triggered. Below is the analysis of the `steps` section;
+    * `checkout`: This copies the code from the source control server (github) to CircleCI environment.
+    * `restore_cache`: Restores a previously saved cache based on a key. Cache needs to have been saved first for this key using save_cache step.
+    * `run`: This is a `step` type used for invoking all command-line programs, taking either a map of configuration values, or, when called in its short-form, a string that will be used as both the command and name. Here it is used to install dependencies and run ESLint.
+    * `save_cache`: Generates and stores a cache of a file or directory of files such as dependencies or source code in our object storage
+* `workflows`: A workflow is a set of rules for defining a collection of jobs and their run order. Workflows support complex job orchestration using a simple set of configuration keys to help you resolve failures sooner. In this article, we defined `build-deploy` rule to run your `build` job and `deploy` only if build passes. The `deploy` job would be added later on in this article.
+
+### Triggering your first build!
+
+Commit your changes to `git` and push to `github`.
+
+```bash
+$ git add .
+$ git commit -m "configure circleci"
+$ git push repo_url master
+```
+Go back to your CircleCI dashbard:
+![](https://i.imgur.com/ZAAiDKC.png)
+Select `Start building` to trigger your first build and successfully link the project. Don't worry, you don't have to go through all these to run builds for this project again. For future builds, you are just `git commit` and `git push` away!
+
+Congratulations, you triggered your first build!
+
+#### __Failing Builds__?
+Check the logs from CircleCI environment and try to fix on your machine then push your changes to trigger a fresh build.
+
+NOTE: Make sure you run `ESLint` on your local machine and ensure linting passes without errors before pushing to github.
+
+### Setting up CircleCI for Continuous Deployment
+The second part of this tutorial is where you will automate deployment to Heroku for every successful build.
+
+### Creating an Heroku App
+Log in to your [heroku dashboard](https://dashboard.heroku.com/apps) and create a new app. Name it `birthdates-api`. Navigate to the `Settings` tab from your app dashboard and copy the `Heroku git url` which will use to deploy the application. Before you proceed, make sure you have `Heroku CLI` installed on your machine, otherwise [check out instructions to install for your Operating System](https://devcenter.heroku.com/articles/heroku-cli).
+
+Run the command below to add the heroku url to your repository:
+
+```bash
+$ git remote add heroku heroku_repo_url
+```
+Next is to generate `API Key` CircleCI would use to authenticate you when making deployments. Go to your `Account Settings` then `Reveal` and Copy your `API Key`.
+Go back to your CircleCI Dashboard, go to `User Settings` then select the `Heroku API key` menu item and paste the `key` you copied from heroku and hit __Save Heroku Key__.
+
+### Configuring Continuous Deployment to Heroku
+First off, let's add a bash script to install heroku on the CircleCI Docker Container.
+Create `install_heroku.sh` inside `./.circleci/`.
+
+```bash
+#!/bin/bash
+wget https://cli-assets.heroku.com/branches/stable/heroku-linux-amd64.tar.gz
+sudo mkdir -p /usr/local/lib /usr/local/bin
+sudo tar -xvzf heroku-linux-amd64.tar.gz -C /usr/local/lib
+sudo ln -s /usr/local/lib/heroku/bin/heroku /usr/local/bin/heroku
+```
+
+Now that you have set up the `Heroku API Key` on CircleCI, open the `./.circleci/config.yml` make the following changes to the deployment job.
+
+```yml
+version: 2
+jobs:
+  build:
+  ...
+  deploy:
+      docker:
+        - image: circleci/node:8.10.0
+      
+      working_directory: ~/app
+
+      steps:
+        - checkout
+        - run:
+            name: Install Heroku
+            command: bash .circleci/install_heroku.sh
+        - run:
+            name: Deploy master to Heroku
+            command: |  # this command is framework-dependent and may vary
+              heroku git:remote -a $HEROKU_APP_NAME
+              git push --force https://heroku:$HEROKU_API_KEY@git.heroku.com/$HEROKU_APP_NAME.git HEAD:refs/heads/master
+              sleep 5  # sleep for 5 seconds to wait for dynos
+              heroku restart
+
+workflows:
+  version: 2
+  build-deploy:
+    jobs:
+      - build
+      - deploy:  # only deploy when master successfully builds
+          requires:
+            - build
+          filters:
+            branches:
+              only: master
+...
+```
+Let's go straight to the `deploy` job you added. Let's analyse the `steps` in the job.
+
+* checkout: This copies over the code from source control serve (github) to the CircleCI Docker Container.
+* run - `Install Heroku`: This step runs the bash script you added previously and installs Heroku on the Docker Container.
+* run - `Deploy master to Heroku`: From the name, this command creates a new heroku deployment, it uses the Environment variables ( HEROKU_API_KEY, HEROKU_APP_NAME ) we will add in the next section to authenticate you and deploy the app.
+
+#### Workflow
+Did you notice the changes we made to the workflow? Basically, what we have done is make the `deploy` job dependent on the `build` so it only runs when the build runs successfully.
+
+### Adding CircleCI Environment Variable
+From your CircleCI dashboard, locate and select the `birthdates-api` project we linked previously and navigate to the project settings
+
+![](https://i.imgur.com/hwsyJqi.png)
+
+Choose the `Environment Variables` menu item from the side bar and create two variables:
+
+* HEROKU_API_KEY : use the value obtained from your heroku account settings
+* HEROKU_APP_NAME : `birthdates-api`
+
+Commit your changes and push to github to trigger a fresh build
+
+```bash
+$ git add .
+$ git commit -m "setup continuous deployment to heroku"
+$ git push origin master
+```
+
+#### And we are done!
+Once that's done, head back to you CircleCI to monitor the build and deployment!
+
+{% include tweet_quote.html quote_text="I just completed a tutorial on how to setup CI / CD with CircleCI and automate deployments to Heroku!" %}
+
+### Recap
+Continuous Integration runs automated testing, linting, builds, etc. for every code change reducing long, difficult and bug-inducing merges. While Continuous Deployment automates release of your application to customer for every successful builds.
+In this article, you have learnt how to setup Continuous Integration for your project and automate deployment to Heroku. There are other tools out there that you can use for a CI / CD workflow.
+
+Happy Coding!
+
