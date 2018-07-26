@@ -71,7 +71,7 @@ $ npm install eslint --save-dev
 To setup the default configuration file, in your project directory, run;
 
 ```bash
-$ ./node_modules/.bin/eslint --init
+$ node_modules/.bin/eslint --init
 ```
 When prompted follow the guide in the screenshot below:
 
@@ -93,6 +93,12 @@ rules:
   comma-dangle:
     - warn
     - never
+  global-require:
+    - off
+  no-underscore-dangle:
+    - off
+  class-methods-use-this:
+    - off
 ```
 Once you are done, add a command to run linting and fix errors in your `package.json` file like below:
 
@@ -100,8 +106,8 @@ Once you are done, add a command to run linting and fix errors in your `package.
 ...
 "script": {
   ...
-  "lint": "./node_modules/.bin/eslint ./app/*",
-  "fix-lint": "./node_modules/.bin/eslint --fix ./app/*"
+  "lint": "node_modules/.bin/eslint ./app/*",
+  "fix-lint": "node_modules/.bin/eslint --fix ./app/*"
   ...
 }
 ...
@@ -135,7 +141,7 @@ Run this command to commit your changes and push to github;
 
 ```bash
 $ git add . # adds changes to staging area
-$ git commit -m some_changes  # commits all staged files
+$ git commit -m "some_changes"  # commits all staged files
 $ git push repo_url master  # pushes changes to github where the repo_url is the url of the source code on github
 ```
 
@@ -156,8 +162,6 @@ jobs:
   build:
     docker:
       - image: circleci/node:8.10.0
-
-    working_directory: ~/app
 
     steps:
       - checkout
@@ -188,12 +192,15 @@ workflows:
 This is a brief analysis of the configuration file:
 
 * `version`: Indicates the version of circleci configuration you are using
-* `jobs`: These are specific tasks you want CircleCI to run upon checking in of code i.e. everytime a build is triggered. Jobs let's just similar / related tasks together. In your `config.yml`, you defined one job, `build`. Under the `build` job, you specified the docker image to be used to run the build, then select the working directory. The `steps` section of the job is where you define specific task to perform everytime build is triggered. Below is the analysis of the `steps` section;
-    * `checkout`: This copies the code from the source control server (github) to CircleCI environment.
-    * `restore_cache`: Restores a previously saved cache based on a key. Cache needs to have been saved first for this key using save_cache step.
-    * `run`: This is a `step` type used for invoking all command-line programs, taking either a map of configuration values, or, when called in its short-form, a string that will be used as both the command and name. Here it is used to install dependencies and run ESLint.
-    * `save_cache`: Generates and stores a cache of a file or directory of files such as dependencies or source code in our object storage
-* `workflows`: A workflow is a set of rules for defining a collection of jobs and their run order. Workflows support complex job orchestration using a simple set of configuration keys to help you resolve failures sooner. In this article, we defined `build-deploy` rule to run your `build` job and `deploy` only if build passes. The `deploy` job would be added later on in this article.
+* `jobs`: These are specific tasks you want CircleCI to run upon checking in of code i.e. everytime a build is triggered. Jobs let's just similar / related tasks together. In your `config.yml`, you defined one job, `build`. The `steps` section of the job is where you define specific task to perform everytime build is triggered. Below is the analysis of the `steps` section;
+    
+  * `checkout`: This copies the code from the source control server (github) to CircleCI environment.
+  * `restore_cache`: Restores a previously saved cache based on a key. Cache needs to have been saved first for this key using save_cache step.
+  * `run`: This is a `step` type used for invoking all command-line programs, taking either a map of configuration values, or, when called in its short-form, a string that will be used as both the command and name. Here it is used to install dependencies and run ESLint.
+  * `save_cache`: Generates and stores a cache of a file or directory of files such as dependencies or source code in our object storage
+
+#### Workflows
+A workflow is a set of rules for defining a collection of jobs and their run order. Workflows support complex job orchestration using a simple set of configuration keys to help you resolve failures sooner. In this article, we defined `build-deploy` rule to run your `build` job and `deploy` only if build passes. The `deploy` job would be added later on in this article.
 
 ### Triggering your first build!
 
@@ -252,8 +259,6 @@ jobs:
       docker:
         - image: circleci/node:8.10.0
       
-      working_directory: ~/app
-
       steps:
         - checkout
         - run:
@@ -287,7 +292,7 @@ Let's go straight to the `deploy` job you added. Let's analyse the `steps` in th
 * run - `Deploy master to Heroku`: From the name, this command creates a new heroku deployment, it uses the Environment variables ( HEROKU_API_KEY, HEROKU_APP_NAME ) we will add in the next section to authenticate you and deploy the app.
 
 #### Workflow
-Did you notice the changes we made to the workflow? Basically, what we have done is make the `deploy` job dependent on the `build` so it only runs when the build runs successfully.
+Did you notice the changes made to the workflow? Basically, what you have done is make the `deploy` job dependent on the `build` so it only runs when the build runs successfully.
 
 ### Adding CircleCI Environment Variable
 From your CircleCI dashboard, locate and select the `birthdates-api` project we linked previously and navigate to the project settings
