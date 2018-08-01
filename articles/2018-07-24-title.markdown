@@ -1,7 +1,7 @@
 ---
 layout: post
-title: "Configure CI & CD with CircleCI"
-description: "In this article, you will learn how to integrate CI / CD workflow with your project"
+title: "Configure a Continuous Integration and Continuous Deployment Pipeline for Your Node.js Apps"
+description: "Learn how to configure a Continuous Integration and Continuous Deployment (CI/CD) pipeline for your Node.js apps."
 date: "2018-07-24 08:30"
 category: Technical Guide, Backend, NodeJS
 author:
@@ -13,14 +13,13 @@ related:
 - 
 ---
 
-**TL;DR:** In this article, you will learn how to integrate the project created in this [article](https://auth0.com/blog/developing-well-organized-apis-with-nodejs-joi-and-mongo/) in a CI/CD (Continuous Integration and Continuous Delivery) workflow to automate the release process using [CircleCI](circleci.com) and [Heroku](heroku.com) .
+**TL;DR:** In this article, you will learn how to integrate the project created in this [article](https://auth0.com/blog/developing-well-organized-apis-with-nodejs-joi-and-mongo/) in a CI/CD (Continuous Integration and Continuous Deployment) workflow to automate the release process using [CircleCI](https://circleci.com) and [Heroku](https://heroku.com) .
 
 {% include tweet_quote.html quote_text="Learn how to integrate your project with CI/CD workflow using @circleci and @heroku" %}
 
-## Configure CI & CD with CirlceCI
+## Continuous Integration and Continuous Deployment (CI/CD) Introduction
 
-Automation comes in different forms, from builds, to tests then deployments. With continuous integration, you can achieve automated builds, testing, packaging and any other development process. 
-
+Automation comes in different forms, from builds, to tests then deployments. With Continuous Integration, you can achieve automated builds, testing, packaging and any other development process. 
 
 Continuous Integration is about delivering small chunks of code continuously which improves a development team’s productivity and helps them fix bugs quickly before the release and deployment phases.
 
@@ -28,58 +27,351 @@ While Continuous Integration prepares your code faster for release, Continuous D
 
 {% include tweet_quote.html quote_text="With Continuous Integration, you can achieve automated builds, testing, packaging and lots more." %}
 
-
-In this article, we would integrate CI/CD workflow with the [birthdates-api](https://auth0.com/blog/developing-well-organized-apis-with-nodejs-joi-and-mongo/) using `CircleCI` as the Continuous Integration Server and automate deployments to `Heroku`.
+In this article, you would integrate CI/CD workflow with the [birthdates-api](https://auth0.com/blog/developing-well-organized-apis-with-nodejs-joi-and-mongo/) using CircleCI as the Continuous Integration Server and automate deployments to Heroku.
 
 {% include tweet_quote.html quote_text="Continuous Intergation increases confidence in code long before production." %}
 
 ## Prerequisites
 
-Before you continue this article, you must have completed [the first part](https://auth0.com/blog/developing-well-organized-apis-with-nodejs-joi-and-mongo/) where you must have built the project used in this article 
+This article used the project built [here](https://auth0.com/blog/developing-well-organized-apis-with-nodejs-joi-and-mongo/). If you have the project from the article on your laptop you can continue from there, otherwise clone this [project](https://GitHub.com/auth0-blog/nodejs-restify).
+
+```bash
+git clone https://github.com/auth0-blog/nodejs-restify
+```
 
 
 ### What Tools Will You Use
 
-As said earlier, we will be using CircleCI and Heroku. This section provides an overview of these tools.
+You will be using [CircleCI](https://circleci.com), [Heroku](https://heroku.com) and [ESLint](https://eslint.org). This section provides an overview of these tools.
 
-### CircleCI
+* CircleCI: CircleCI is Continuous Integration and Deployment platform which makes it easy for teams of all sizes to rapidly build and release quality software at scale.
 
-CircleCI is continuous integration and delivery platform makes it easy for teams of all sizes to rapidly build and release quality software at scale.
+* Heroku: Heroku is a platform as a service (PaaS) that enables developers to build, run, and operate applications entirely in the cloud.
 
-### Heroku
+* ESLint: ESLint is a tool for identifying and reporting on patterns found in ECMAScript/JavaScript code, with the goal of making code more consistent and avoiding bugs. 
 
-Heroku is a platform as a service (PaaS) that enables developers to build, run, and operate applications entirely in the cloud.
+## Securing the `birthdates-api` with Auth0 
 
-### ESLint
+Securing Node.js applications with Auth0 is easy and brings a lot of great features to the table. With [Auth0](https://auth0.com), you only have to write a few lines of code to get [solid identity management solution](https://auth0.com/user-management), [single sign-on](https://auth0.com/docs/sso/current), [support for social identity providers (like Facebook, GitHub, Twitter, etc.)](https://auth0.com/docs/identityproviders), and [support for enterprise identity providers (like Active Directory, LDAP, SAML, custom, etc.)](https://auth0.com/enterprise).
 
-ESLint is a tool for identifying and reporting on patterns found in ECMAScript/JavaScript code, with the goal of making code more consistent and avoiding bugs. 
+In the following sections, you are going to learn how to use Auth0 to secure the `birthdates-api` written with [Restify](http://restify.com/).
 
-## Configure CircleCI for Birthdates API
+## Registering the API at Auth0
 
-If you have the project from previous article on your laptop you can continue from there, if not clone this [project](https://github.com/auth0-blog/nodejs-restify).
+Start by registering an API on Auth0 to represent your app. To do this, head to the [API section of your management dashboard](https://manage.auth0.com/#/apis) (you can create a [free account](https://auth0.com/signup) if needed) and click on "Create API". On the dialog that appears, you can name your API as "Birthdates API" (the name isn't really important) and identify it as `https://birthdates-api.herokuapp.com/` (you will use this value later).
+
+After creating it, you have to go to the "Scopes" tab of the API and define the desired scopes. For this sample, you will define two scopes: `read:birthdates` and `add:birthdates`. They will represent two different operations (read and add) over the same entity (birthdates).
+
+### Securing Restify with Auth0
+
+Now that you have registered the API in your Auth0 account, secure the Restify API with Auth0. Start by installing three dependencies with NPM: `npm i express-unless jsonwebtoken jwks-rsa express-jwt-authz`. 
+
+Next, inside `app/lib` create `restify-jwt`, a middleware that validates `JsonWebTokens` and sets `req.user`.
+
+```js
+var jwt = require("jsonwebtoken");
+var unless = require("express-unless");
+var restify = require("restify");
+var async = require("async");
+
+var InvalidCredentialsError = require("restify-errors").InvalidCredentialsError;
+var UnauthorizedError = require("restify-errors").UnauthorizedError;
+
+var DEFAULT_REVOKED_FUNCTION = function(_, __, cb) {
+    return cb(null, false);
+};
+
+var getClass = {}.toString;
+function isFunction(object) {
+    return object && getClass.call(object) == "[object Function]";
+}
+
+function wrapStaticSecretInCallback(secret) {
+    return function(_, __, cb) {
+        return cb(null, secret);
+    };
+}
+
+module.exports = function(options) {
+    if (!options || !options.secret) throw new Error("secret should be set");
+
+    var secretCallback = options.secret;
+
+    if (!isFunction(secretCallback)) {
+        secretCallback = wrapStaticSecretInCallback(secretCallback);
+    }
+
+    var isRevokedCallback = options.isRevoked || DEFAULT_REVOKED_FUNCTION;
+
+    var _requestProperty =
+        options.userProperty || options.requestProperty || "user";
+    var credentialsRequired =
+        typeof options.credentialsRequired === "undefined"
+            ? true
+            : options.credentialsRequired;
+
+    var middleware = function(req, res, next) {
+        var token;
+
+        if (
+            req.method === "OPTIONS" &&
+            req.headers.hasOwnProperty("access-control-request-headers")
+        ) {
+            var hasAuthInAccessControl = !!~req.headers[
+                "access-control-request-headers"
+            ]
+                .split(",")
+                .map(function(header) {
+                    return header.trim();
+                })
+                .indexOf("authorization");
+
+            if (hasAuthInAccessControl) {
+                return next();
+            }
+        }
+
+        if (options.getToken && typeof options.getToken === "function") {
+            try {
+                token = options.getToken(req);
+            } catch (e) {
+                return next(e);
+            }
+        } else if (req.headers && req.headers.authorization) {
+            var parts = req.headers.authorization.split(" ");
+            if (parts.length == 2) {
+                var scheme = parts[0];
+                var credentials = parts[1];
+
+                if (/^Bearer$/i.test(scheme)) {
+                    token = credentials;
+                } else {
+                    return res.send(
+                        new InvalidCredentialsError(
+                            "Format is Authorization: Bearer [token]"
+                        )
+                    );
+                }
+            } else {
+                return res.send(
+                    new InvalidCredentialsError(
+                        "Format is Authorization: Bearer [token]"
+                    )
+                );
+            }
+        }
+
+        if (!token) {
+            if (credentialsRequired) {
+                return res.send(
+                    new InvalidCredentialsError(
+                        "No authorization token was found"
+                    )
+                );
+            } else {
+                return next();
+            }
+        }
+
+        var dtoken = jwt.decode(token, { complete: true });
+        if (dtoken === null)
+            return res.send(
+                new InvalidCredentialsError("Invalid token provided")
+            );
+
+        async.parallel(
+            [
+                function(callback) {
+                    var arity = secretCallback.length;
+                    if (arity == 4) {
+                        secretCallback(
+                            req,
+                            dtoken.header,
+                            dtoken.payload,
+                            callback
+                        );
+                    } else {
+                        // arity == 3
+                        secretCallback(req, dtoken.payload, callback);
+                    }
+                },
+                function(callback) {
+                    isRevokedCallback(req, dtoken.payload, callback);
+                }
+            ],
+            function(err, results) {
+                if (err) {
+                    return res.send(err);
+                }
+                var revoked = results[1];
+                if (revoked) {
+                    return res.send(
+                        new UnauthorizedError("The token has been revoked.")
+                    );
+                }
+
+                var secret = results[0];
+
+                jwt.verify(token, secret, options, function(err, decoded) {
+                    if (err && credentialsRequired)
+                        return res.send(
+                            new InvalidCredentialsError(err.message)
+                        );
+
+                    req[_requestProperty] = decoded;
+                    next();
+                });
+            }
+        );
+    };
+
+    middleware.unless = unless;
+
+    return middleware;
+};
+
+```
+
+After that, inside `app/middlewares`, create a file called `auth0.js` and use these dependencies:
+
+```js
+const jwt = require('../lib/restify-jwt');
+const jwksRsa = require('jwks-rsa');
+const jwtAuthz = require('express-jwt-authz');
+
+const tokenGuard = jwt({
+  // Fetch the signing key based on the KID in the header and
+  // the singing keys provided by the JWKS endpoint.
+  secret: jwksRsa.expressJwtSecret({
+    cache: true,
+    rateLimit: true,
+    jwksUri: `https://${process.env.AUTH0_DOMAIN}/.well-known/jwks.json`
+  }),
+
+  // Validate the audience and the issuer.
+  audience: process.env.AUTH0_AUDIENCE,
+  issuer: `https://${process.env.AUTH0_DOMAIN}/`,
+  algorithms: ['RS256']
+});
+
+module.exports = function (scopes) {
+  const scopesGuard = jwtAuthz(scopes || []);
+  return function mid(req, res, next) {
+    tokenGuard(req, res, (err) => {
+      err ? res.status(500).send(err) : scopesGuard(req, res, next);
+    });
+  }
+};
+```
+
+The goal of this script is to export a Restify middleware that guarantees that requests have an `access_token` issued by a trust-worthy party, in this case Auth0. The middleware also accepts an array of scopes. When filtering requests, this middleware will check that these scopes exist in the `access_token`. Note that this script expects to find two environment variables:
+
+* `AUTH0_AUDIENCE`: the identifier of our API (`https://birthdates-api.herokuapp.com`)
+* `AUTH0_DOMAIN`: our domain at Auth0 (in my case `biodunch.auth0.com`)
+
+You will set these variable soon, but it is important to understand that the domain variable defines how the middleware finds the signing keys.
+
+After creating this middleware, you can update your `app/routes/routes.js` file to import and use it:
+
+```js
+'use strict';
+const auth0 = require('../middlewares/auth0');
+
+module.exports.register = (server, serviceLocator) => {
+
+  // other endpoints
+
+  server.get(
+    {
+      path: '/birthdates/:username',
+      name: 'Get Birthdates',
+      version: '1.0.0',
+      validation: {
+        params: require('../validations/get_birthdates-user.js')
+      }
+    },
+    auth0(['read:birthdates']),
+    (req, res, next) =>
+      serviceLocator.get('birthdateController').listAll(req, res, next)
+  );
+
+  server.post(
+    {
+      path: '/birthdates/:username',
+      name: 'Create Birthdate',
+      version: '1.0.0',
+      validation: {
+        body: require('../validations/create_birthdates')
+      }
+    },
+    auth0(['add:birthdates']),
+    (req, res, next) =>
+      serviceLocator.get('birthdateController').create(req, res, next)
+  );
+};
+```
+
+In this case, you have replaced the previous definition of your endpoints to use the new middleware. You also restricted their access to users that contain the right combination of scopes. That is, to get birthdates, users must have the `read:birthdates` scope and to create new records they must have the `add:birthdates` scope.
+
+Running the application now is slightly different, as you need to set the environment variables:
+
+```bash
+export AUTH0_DOMAIN=biodunch.auth0.com
+export AUTH0_AUDIENCE="https://birthdates-api.herokuapp.com/"
+node server.js
+```
+
+Keep this API running before moving on.
+
+### Creating an Auth0 Application
+
+As the focus of this section is to secure Node.js applications with Auth0, [you are going to use a live Angular app that has a configurable Auth0 application](http://auth0.digituz.com.br/?clientID=ssII6Fu1qfFI4emuNeXeadMv8iTQn1hJ&domain=biodunch.auth0.com&audience=https:%2F%2Fbirthdates.herokuapp.com%2F&scope=read:birthdates). Before using this app, you need to create an Auth0 application that represents it. Head to the ["Applications" section of the management dashboard](https://manage.auth0.com/#/applications) and click on the "Create Application" button.
+
+On the popup shown, set the name of this new application as "Birthdates Application" and choose "Single Page Web App" as the application type. After hitting the "Create" button, you have to go to the "Settings" tab and set `http://auth0.digituz.com.br/callback` in the "Allowed Callback URLs" field.
+
+Now you can save the application and head to [the sample Angular app secured with Auth0](http://auth0.digituz.com.br/?clientID=ssII6Fu1qfFI4emuNeXeadMv8iTQn1hJ&domain=bk-samples.auth0.com&audience=https:%2F%2Fbirthdates-api.herokuapp.com%2F&scope=read:birthdates). To use this app, you need to set the correct values for four properties:
+
+* `clientID`: You have to copy this value from the "Client ID" field of the "Settings" tab of "birthdates Application".
+* `domain`: You can also copy this value from the "Settings" tab of "Birthdates Application".
+* `audience`: You have to set this property to meet the identifier of the "Birthdates API" that you created earlier.
+* `scope`: This property will define the `authority` that the `access_token` will get access to in the backend API. For example: `read:birthdates` or both `read:birthdates add:birthdates`.
+
+Then you can hit the "Sign In with Auth0" button.
+
+After signing in, you can use the application to submit requests to your secured Node.js API. For example, if you issue a GET request to `http://localhost:5000/v1/birthdates/biodunch`, the Angular app will include the `access_token` in the `Authorization` header and your API will respond with a list of birthdates.
 
 ### Setting Up Linter
 
-First step in this article is to setup Linter for the project which will be one of the stages of the CirleCI build jobs. The linter we would be using is [ESLint](https://eslint.org/).
+First step in this article is to setup Linter for the project which will be one of the stages of the CirleCI build jobs. The linter you would be using is [ESLint](https://eslint.org/).
 
 Run this command to install ESLint in the project directory;
 
 ```bash 
-$ npm install eslint --save-dev
+npm install eslint --save-dev
 ```
 
-To setup the default configuration file, in your project directory, run;
+Next, setup the default configuration file. Run the command below in your project directory:
 
 ```bash
-$ node_modules/.bin/eslint --init
+node_modules/.bin/eslint --init
 ```
-When prompted follow the guide in the screenshot below:
 
-![](https://i.imgur.com/1Wni4Mqg.png)
+When prompted follow the guide below:
 
-If you have problem setting it up, checkout their [getting started guide](https://eslint.org/docs/user-guide/getting-started).
+* How would you like to configure ESLint? Use a popular style guide
+* Which style guid would you like to follow? [Airbnb](https://github.com/airbnb/javascript)
+* Do you use React? No
+* What format do you want your config to be in? YAML
+> The style guide "airbnb" requires `eslint@^4.19.1`. You are currently using `eslint@version`.
+* Do you want to downgrade? Yes
+> The config that you've selected requires the following dependencies: `eslint-config-airbnb-base@latest` `eslint@^4.19.1` `eslint-plugin-import@^2.12.0`
+* Would you like to install them now? Yes
 
-Open `./eslintrc.yml` and add the following configuration to it:
+If you encountered problem setting it up, checkout their [getting started guide](https://eslint.org/docs/user-guide/getting-started).
+
+With that done, add the `lib` directory to `.eslintignore` so it won't be linted to limit the coverage to only api specific code.
+
+After that, open the `./eslintrc.yml` file and add the following configuration to it:
 
 ```yml
 extends: airbnb-base
@@ -100,7 +392,8 @@ rules:
   class-methods-use-this:
     - off
 ```
-Once you are done, add a command to run linting and fix errors in your `package.json` file like below:
+
+Once you are done, add a command to run lint and fix errors to `package.json` file like below:
 
 ```json
 ...
@@ -112,49 +405,55 @@ Once you are done, add a command to run linting and fix errors in your `package.
 }
 ...
 ```
-Take ESlint for a spin!
+
+With that done, take ESlint for a spin!
 
 ```bash
-$ npm run lint
+npm run lint
 ```
 
-Did you get so many red flags? Get to fixing, lol.
-Fix faster with:
+After running the above command you are most likely going to encounter some errors. `eslint` command has a `--fix` option which automatically fixes some issues but not all. Remember you added the `fix-lint` script to `package.json` earlier? Run the script with `npm`:
 
 ```bash
-$ npm run fix-lint
+npm run fix-lint
 ```
-NOTE: The command fixes actual files with errors and only the remaining unfixed issues are output. The `--fix` option doesn't fix all problems.
+
+> __Note__: The command fixes actual files with errors and only the remaining unfixed issues are output. 
+To fix other errors, read the error description and check the line number, then make appropriate correction.
 
 ### Setting Up Version Control
 
-To practise Continuous Integration, you have to host your source code on a  version control server. For this project, you will use `Github`. 
-So head over to github and create a repository named `birthdates-api`. Next is to push your local changes to github.
+To practise Continuous Integration, you have to host your source code on a  [version control system](https://en.wikipedia.org/wiki/Version_control). For this project, you will use GitHub. 
+So head over to GitHub and create a repository named `birthdates-api`. Next is to push your local changes to GitHub.
 
 If you haven't initialized git, run the following command otherwise skip this part;
 
 ```bash
-$ git init
-$ echo 'node_modules/' >> './.gitignore'
+git init
+echo 'node_modules/' >> './.gitignore'
 ```
-Run this command to commit your changes and push to github;
+
+Run the following commands to commit your changes and push them to your GitHub repository:
 
 ```bash
-$ git add . # adds changes to staging area
-$ git commit -m "some_changes"  # commits all staged files
-$ git push repo_url master  # pushes changes to github where the repo_url is the url of the source code on github
+git add . # adds changes to staging area
+git commit -m "some_changes"  # commits all staged files
+git push repo_url master  # pushes changes to GitHub where the repo_url is the url of the source code on GitHub
 ```
+> __Note__: You will have to replace repo_url with the URL of your own GitHub repository.
+
 
 ### Setting Up CircleCI for Continuous Integration
-Now that your code is hosted on github, next step is to connect CircleCI to connect with your Github account so it can pull the code from it everytime it runs a build.
-Head over to [https://circleci.com/account](https://circleci.com/account), select `Account Integrations` then `Connect with Github`.
-Once that is done, head over to your [CircleCI Dashboard](https://circleci.com/dashboard), select `Add Project` from the side bar. Choose the `birthdates-api` project and hit the `Set up Project` button.
+
+Now that your code is hosted on GitHub, next step is to connect CircleCI with your GitHub account so it can pull the code from it everytime it runs a build.
+Head over to [https://circleci.com/account](https://circleci.com/account), select "Account Integrations" then "Connect with GitHub".
+Once that is done, head over to your [CircleCI Dashboard](https://circleci.com/dashboard), select "Add Project" from the side bar. Choose the `birthdates-api` project and hit the "Set up Project" button.
+
 ![Set up project](https://i.imgur.com/KmYUQiO.png)
+
 Select the Operating System to run the builds and Language as seen in the screenshot above. 
 
-Next thing is to create CircleCI configuration file in the root directory of the project where you will describe the jobs and build steps.
-
-Create `.circleci` directory then `config.yml` inside the directory with the snippets below:
+Next, create CircleCI configuration file (`.circleci\config.yml`) in the root directory of the project where you will describe the jobs and build steps.
 
 ```yaml
 version: 2
@@ -189,56 +488,69 @@ workflows:
     jobs:
       - build
 ```
+
 This is a brief analysis of the configuration file:
 
-* `version`: Indicates the version of circleci configuration you are using
-* `jobs`: These are specific tasks you want CircleCI to run upon checking in of code i.e. everytime a build is triggered. Jobs let's just similar / related tasks together. In your `config.yml`, you defined one job, `build`. The `steps` section of the job is where you define specific task to perform everytime build is triggered. Below is the analysis of the `steps` section;
+* version: Indicates the version of circleci configuration you are using
+* jobs: These are specific tasks you want CircleCI to run upon checking in of code i.e. everytime a build is triggered. Jobs let's just similar / related tasks together. In your `config.yml`, you defined one job, `build`. The `steps` section of the job is where you define specific task to perform everytime build is triggered. Below is the analysis of the `steps` section;
     
-  * `checkout`: This copies the code from the source control server (github) to CircleCI environment.
-  * `restore_cache`: Restores a previously saved cache based on a key. Cache needs to have been saved first for this key using save_cache step.
-  * `run`: This is a `step` type used for invoking all command-line programs, taking either a map of configuration values, or, when called in its short-form, a string that will be used as both the command and name. Here it is used to install dependencies and run ESLint.
-  * `save_cache`: Generates and stores a cache of a file or directory of files such as dependencies or source code in our object storage
+  * checkout: This copies the code from the source control system (GitHub) to CircleCI environment.
+  * restore_cache: Restores a previously saved cache based on a key. Cache needs to have been saved first for this key using save_cache step.
+  * run: This is a step type used for invoking all command-line programs, taking either a map of configuration values, or, when called in its short-form, a string that will be used as both the command and name. Here it is used to install dependencies and run ESLint.
+  * save_cache: Generates and stores a cache of a file or directory of files such as dependencies or source code in our object storage
 
 #### Workflows
-A workflow is a set of rules for defining a collection of jobs and their run order. Workflows support complex job orchestration using a simple set of configuration keys to help you resolve failures sooner. In this article, we defined `build-deploy` rule to run your `build` job and `deploy` only if build passes. The `deploy` job would be added later on in this article.
+
+A workflow is a set of rules for defining a collection of jobs and their run order. Workflows support complex job orchestration using a simple set of configuration keys to help you resolve failures sooner. In this article, you defined `build-deploy` rule to run your `build` job and `deploy` only if build passes. The `deploy` job would be added later on in this article.
 
 ### Triggering your first build!
 
-Commit your changes to `git` and push to `github`.
+Commit your changes to `git` and push to GitHub.
 
 ```bash
-$ git add .
-$ git commit -m "configure circleci"
-$ git push repo_url master
+git add .
+git commit -m "configure circleci"
+git push repo_url master
 ```
 Go back to your CircleCI dashbard:
+
 ![](https://i.imgur.com/ZAAiDKC.png)
-Select `Start building` to trigger your first build and successfully link the project. Don't worry, you don't have to go through all these to run builds for this project again. For future builds, you are just `git commit` and `git push` away!
+
+Select "Start building" to trigger your first build and successfully link the project. Don't worry, you don't have to go through all these to run builds for this project again. For future builds, you are just `git commit` and `git push` away!
 
 Congratulations, you triggered your first build!
 
 #### __Failing Builds__?
-Check the logs from CircleCI environment and try to fix on your machine then push your changes to trigger a fresh build.
 
-NOTE: Make sure you run `ESLint` on your local machine and ensure linting passes without errors before pushing to github.
+Check the logs from CircleCI environment and try to fix on your machine then commit your changes and push to GitHub to trigger a fresh build.
+
+> __Note__: Make sure you run ESLint on your local machine and ensure linting passes without errors before pushing to GitHub.
 
 ### Setting up CircleCI for Continuous Deployment
+
 The second part of this tutorial is where you will automate deployment to Heroku for every successful build.
 
 ### Creating an Heroku App
-Log in to your [heroku dashboard](https://dashboard.heroku.com/apps) and create a new app. Name it `birthdates-api`. Navigate to the `Settings` tab from your app dashboard and copy the `Heroku git url` which will use to deploy the application. Before you proceed, make sure you have `Heroku CLI` installed on your machine, otherwise [check out instructions to install for your Operating System](https://devcenter.heroku.com/articles/heroku-cli).
 
-Run the command below to add the heroku url to your repository:
+Log in to your [heroku dashboard](https://dashboard.heroku.com/apps) and create a new app. Name it `birthdates-api`. Next is to generate Heroku API Key that CircleCI would use to authenticate you when making deployments. 
 
-```bash
-$ git remote add heroku heroku_repo_url
-```
-Next is to generate `API Key` CircleCI would use to authenticate you when making deployments. Go to your `Account Settings` then `Reveal` and Copy your `API Key`.
-Go back to your CircleCI Dashboard, go to `User Settings` then select the `Heroku API key` menu item and paste the `key` you copied from heroku and hit __Save Heroku Key__.
+Follow the steps below to genetate your API Key and add it to CircleCI:
+
+* go to "Account Settings"
+* click "Reveal" 
+* then _Copy_ your API Key.
+
+Go back to your CircleCI Dashboard:
+
+* go to "User Settings" 
+* select the "Heroku API key" menu item 
+* paste the key you copied from heroku
+* hit "Save Heroku Key".
 
 ### Configuring Continuous Deployment to Heroku
-First off, let's add a bash script to install heroku on the CircleCI Docker Container.
-Create `install_heroku.sh` inside `./.circleci/`.
+
+First off, add a bash script to install heroku on the CircleCI Docker Container.
+Create `install_heroku.sh` inside `./.circleci`.
 
 ```bash
 #!/bin/bash
@@ -248,7 +560,7 @@ sudo tar -xvzf heroku-linux-amd64.tar.gz -C /usr/local/lib
 sudo ln -s /usr/local/lib/heroku/bin/heroku /usr/local/bin/heroku
 ```
 
-Now that you have set up the `Heroku API Key` on CircleCI, open the `./.circleci/config.yml` make the following changes to the deployment job.
+Now that you have added your Heroku API Key to CircleCI, open the `./.circleci/config.yml` make the following changes to the deployment job.
 
 ```yml
 version: 2
@@ -285,41 +597,42 @@ workflows:
               only: master
 ...
 ```
-Let's go straight to the `deploy` job you added. Let's analyse the `steps` in the job.
 
-* checkout: This copies over the code from source control serve (github) to the CircleCI Docker Container.
-* run - `Install Heroku`: This step runs the bash script you added previously and installs Heroku on the Docker Container.
-* run - `Deploy master to Heroku`: From the name, this command creates a new heroku deployment, it uses the Environment variables ( HEROKU_API_KEY, HEROKU_APP_NAME ) we will add in the next section to authenticate you and deploy the app.
+Let's go straight to the __deploy__ job you added. Let's analyse the __steps__ in the job.
+
+* checkout: This copies over the code from source control serve (GitHub) to the CircleCI Docker Container.
+* run - __Install Heroku__: This step runs the bash script you added previously and installs Heroku on the Docker Container.
+* run - __Deploy master to Heroku__: From the name, this command creates a new heroku deployment, it uses the Environment variables ( HEROKU_API_KEY, HEROKU_APP_NAME ) you will add in the next section to authenticate you and deploy the app.
 
 #### Workflow
+
 Did you notice the changes made to the workflow? Basically, what you have done is make the `deploy` job dependent on the `build` so it only runs when the build runs successfully.
 
 ### Adding CircleCI Environment Variable
-From your CircleCI dashboard, locate and select the `birthdates-api` project we linked previously and navigate to the project settings
+
+From your CircleCI dashboard, locate and select the `birthdates-api` project you linked previously and navigate to the project settings
 
 ![](https://i.imgur.com/hwsyJqi.png)
 
-Choose the `Environment Variables` menu item from the side bar and create two variables:
+Choose the __Environment Variables__ menu item from the side bar and create two variables:
 
-* HEROKU_API_KEY : use the value obtained from your heroku account settings
-* HEROKU_APP_NAME : `birthdates-api`
+* `HEROKU_API_KEY` : use the value obtained from your heroku account settings
+* `HEROKU_APP_NAME` : `birthdates-api`
 
-Commit your changes and push to github to trigger a fresh build
+Commit your changes and push to GitHub to trigger a fresh build
 
 ```bash
-$ git add .
-$ git commit -m "setup continuous deployment to heroku"
-$ git push origin master
+git add .
+git commit -m "setup continuous deployment to heroku"
+git push origin master
 ```
 
-#### And we are done!
+#### And you are done!
+
 Once that's done, head back to you CircleCI to monitor the build and deployment!
 
 {% include tweet_quote.html quote_text="I just completed a tutorial on how to setup CI / CD with CircleCI and automate deployments to Heroku!" %}
 
-### Recap
-Continuous Integration runs automated testing, linting, builds, etc. for every code change reducing long, difficult and bug-inducing merges. While Continuous Deployment automates release of your application to customer for every successful builds.
-In this article, you have learnt how to setup Continuous Integration for your project and automate deployment to Heroku. There are other tools out there that you can use for a CI / CD workflow.
-
-Happy Coding!
-
+### Conclusion
+Congratulations, you have just automated build and deployment for a Node.js application.
+In this article, you have learnt how to setup Continuous Integration for Node.js application with CircleCI and automate deployment to Heroku. There are other [tools](https://code-maze.com/top-8-continuous-integration-tools/) out there that you can use for a CI / CD workflow.
